@@ -269,8 +269,10 @@ public class Learner {
     protected QuorumServer findLeader() {
         QuorumServer leaderServer = null;
         // Find the leader by id
+        // 本节点的最终投票选举的节点
         Vote current = self.getCurrentVote();
         for (QuorumServer s : self.getView().values()) {
+            // 通过id找到leader
             if (s.id == current.getId()) {
                 // Ensure we have the leader's correct IP address before
                 // attempting to connect.
@@ -323,6 +325,7 @@ public class Learner {
         ExecutorService executor = Executors.newFixedThreadPool(addresses.size());
         CountDownLatch latch = new CountDownLatch(addresses.size());
         AtomicReference<Socket> socket = new AtomicReference<>(null);
+        // 连接leader
         addresses.stream().map(address -> new LeaderConnector(address, socket, latch)).forEach(executor::submit);
 
         try {
@@ -373,6 +376,7 @@ public class Learner {
         public void run() {
             try {
                 Thread.currentThread().setName("LeaderConnector-" + address);
+                // 连接leader
                 Socket sock = connectToLeader();
 
                 if (sock != null && sock.isConnected()) {

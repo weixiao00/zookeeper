@@ -42,6 +42,7 @@ public class ByteBufferRequestRecord implements RequestRecord {
 
         record = constructor.get();
         request.rewind();
+        //反序列化 (将ByteBuffer反序列化成为ExitsRequest.这个就是我们在客户端 发起请求的时候传递过来的Request对象
         ByteBufferInputStream.byteBuffer2Record(request, record);
         request.rewind();
         return (T) record;

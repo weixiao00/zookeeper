@@ -24,16 +24,20 @@ import org.apache.zookeeper.server.quorum.flexible.QuorumVerifier;
 
 public class SyncedLearnerTracker {
 
+    // 这个集合里最多两个数据size=2
     protected ArrayList<QuorumVerifierAcksetPair> qvAcksetPairs = new ArrayList<QuorumVerifierAcksetPair>();
 
     public void addQuorumVerifier(QuorumVerifier qv) {
+        // 创建一个选举验证器和ackset的对
         qvAcksetPairs.add(new QuorumVerifierAcksetPair(qv, new HashSet<Long>(qv.getVotingMembers().size())));
     }
 
     public boolean addAck(Long sid) {
         boolean change = false;
         for (QuorumVerifierAcksetPair qvAckset : qvAcksetPairs) {
+            // 如果所有的成员包含这个sid
             if (qvAckset.getQuorumVerifier().getVotingMembers().containsKey(sid)) {
+                // 添加到ackset中
                 qvAckset.getAckset().add(sid);
                 change = true;
             }
@@ -52,6 +56,7 @@ public class SyncedLearnerTracker {
 
     public boolean hasAllQuorums() {
         for (QuorumVerifierAcksetPair qvAckset : qvAcksetPairs) {
+            // 判断是否过半了
             if (!qvAckset.getQuorumVerifier().containsQuorum(qvAckset.getAckset())) {
                 return false;
             }

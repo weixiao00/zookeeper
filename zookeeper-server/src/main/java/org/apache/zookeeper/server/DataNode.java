@@ -36,6 +36,7 @@ import org.apache.zookeeper.data.StatPersisted;
  * array of ACLs, a stat object, and a set of its children's paths.
  *
  */
+// 真正的数据对象
 @SuppressFBWarnings({"EI_EXPOSE_REP", "EI_EXPOSE_REP2"})
 public class DataNode implements Record {
 
@@ -47,6 +48,7 @@ public class DataNode implements Record {
     volatile boolean digestCached;
 
     /** the data for this datanode */
+    // 某个path真正存储的数据
     byte[] data;
 
     /**
@@ -57,6 +59,7 @@ public class DataNode implements Record {
     /**
      * the stat for this node that is persisted to disk.
      */
+    // 节点的状态，包括版本号、创建时间、修改时间等
     public StatPersisted stat;
 
     /**
@@ -64,6 +67,7 @@ public class DataNode implements Record {
      * does not contain the parent path -- just the last part of the path. This
      * should be synchronized on except deserializing (for speed up issues).
      */
+    // 子节点的path。这里存储比如 /a/b/c 存储c。不包含父节点的path
     private Set<String> children = null;
 
     private static final Set<String> EMPTY_SET = Collections.emptySet();
@@ -171,6 +175,12 @@ public class DataNode implements Record {
         return stat.getEphemeralOwner();
     }
 
+    /**
+     * 客户端发送的数据进行反序列化成DataNode
+     * @param archive
+     * @param tag
+     * @throws IOException
+     */
     public synchronized void deserialize(InputArchive archive, String tag) throws IOException {
         archive.startRecord("node");
         data = archive.readBuffer("data");

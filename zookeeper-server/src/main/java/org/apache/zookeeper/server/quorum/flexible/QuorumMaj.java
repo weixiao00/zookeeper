@@ -38,8 +38,13 @@ public class QuorumMaj implements QuorumVerifier {
 
     private static final Logger LOG = LoggerFactory.getLogger(QuorumMaj.class);
 
+    // 所有的节点，包括观察者节点
     private Map<Long, QuorumServer> allMembers = new HashMap<Long, QuorumServer>();
+
+    // 投票节点，不包括观察者节点
     private Map<Long, QuorumServer> votingMembers = new HashMap<Long, QuorumServer>();
+
+    // 观察者节点
     private Map<Long, QuorumServer> observingMembers = new HashMap<Long, QuorumServer>();
     private long version = 0;
     protected int half;
@@ -85,25 +90,37 @@ public class QuorumMaj implements QuorumVerifier {
         half = votingMembers.size() / 2;
     }
 
+    /**
+     * zookeeper节点在初始化的时候就创建了QuorumMaj对象
+     * @param props
+     * @throws ConfigException
+     */
     public QuorumMaj(Properties props) throws ConfigException {
         for (Entry<Object, Object> entry : props.entrySet()) {
             String key = entry.getKey().toString();
             String value = entry.getValue().toString();
 
+            //server.1=10.15.122.88:2881:3881
+            //server.2=10.15.122.88:2882:3882
+            //server.3=10.15.122.88:2883:3883
             if (key.startsWith("server.")) {
                 int dot = key.indexOf('.');
                 long sid = Long.parseLong(key.substring(dot + 1));
                 QuorumServer qs = new QuorumServer(sid, value);
+                // 所有的节点，包括观察者节点
                 allMembers.put(Long.valueOf(sid), qs);
                 if (qs.type == LearnerType.PARTICIPANT) {
+                    // 投票节点，不包括观察者节点
                     votingMembers.put(Long.valueOf(sid), qs);
                 } else {
+                    // 观察者节点
                     observingMembers.put(Long.valueOf(sid), qs);
                 }
             } else if (key.equals("version")) {
                 version = Long.parseLong(value, 16);
             }
         }
+        // 所有选票成员的一半
         half = votingMembers.size() / 2;
     }
 

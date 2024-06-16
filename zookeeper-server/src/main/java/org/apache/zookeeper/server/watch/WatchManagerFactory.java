@@ -38,6 +38,7 @@ public class WatchManagerFactory {
             watchManagerName = WatchManager.class.getName();
         }
         try {
+            // 通过反射创建 WatchManager 实例
             IWatchManager watchManager = (IWatchManager) Class.forName(watchManagerName).getConstructor().newInstance();
             LOG.info("Using {} as watch manager", watchManagerName);
             return watchManager;

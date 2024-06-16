@@ -158,15 +158,20 @@ public class SessionTrackerImpl extends ZooKeeperCriticalThread implements Sessi
     public void run() {
         try {
             while (running) {
+                // 计算当前时间和下一个过期时间的差值
                 long waitTime = sessionExpiryQueue.getWaitTime();
+                // 睡眠
                 if (waitTime > 0) {
                     Thread.sleep(waitTime);
                     continue;
                 }
 
+                // 从sessionExpiryQueue队列中拿出来所有过期的session，循环关闭
                 for (SessionImpl s : sessionExpiryQueue.poll()) {
                     ServerMetrics.getMetrics().STALE_SESSIONS_EXPIRED.add(1);
+                    // 更新session的状态为关闭
                     setSessionClosing(s.sessionId);
+                    // 关闭session
                     expirer.expire(s);
                 }
             }
@@ -176,7 +181,14 @@ public class SessionTrackerImpl extends ZooKeeperCriticalThread implements Sessi
         LOG.info("SessionTrackerImpl exited loop!");
     }
 
+    /**
+     * 进行session的续期方法
+     * @param sessionId
+     * @param timeout
+     * @return
+     */
     public synchronized boolean touchSession(long sessionId, int timeout) {
+        // 获取session
         SessionImpl s = sessionsById.get(sessionId);
 
         if (s == null) {
@@ -189,6 +201,7 @@ public class SessionTrackerImpl extends ZooKeeperCriticalThread implements Sessi
             return false;
         }
 
+        // 更新session的到期时间
         updateSessionExpiry(s, timeout);
         return true;
     }
@@ -258,6 +271,11 @@ public class SessionTrackerImpl extends ZooKeeperCriticalThread implements Sessi
         }
     }
 
+    /**
+     * 创建session
+     * @param sessionTimeout
+     * @return
+     */
     public long createSession(int sessionTimeout) {
         long sessionId = nextSessionId.getAndIncrement();
         trackSession(sessionId, sessionTimeout);

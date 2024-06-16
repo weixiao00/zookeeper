@@ -139,12 +139,13 @@ public class PrepRequestProcessor extends ZooKeeperCriticalThread implements Req
         try {
             while (true) {
                 ServerMetrics.getMetrics().PREP_PROCESSOR_QUEUE_SIZE.add(submittedRequests.size());
+                // 从阻塞队列中取出请求
                 Request request = submittedRequests.take();
                 ServerMetrics.getMetrics().PREP_PROCESSOR_QUEUE_TIME
                     .add(Time.currentElapsedTime() - request.prepQueueStartTime);
                 if (LOG.isTraceEnabled()) {
                     long traceMask = ZooTrace.CLIENT_REQUEST_TRACE_MASK;
-                    if (request.type == OpCode.ping) {
+                    if (request.type == OpCode.ping) { // 判断请求类型
                         traceMask = ZooTrace.CLIENT_PING_TRACE_MASK;
                     }
                     ZooTrace.logRequest(LOG, traceMask, 'P', request, "");
@@ -154,6 +155,7 @@ public class PrepRequestProcessor extends ZooKeeperCriticalThread implements Req
                 }
 
                 request.prepStartTime = Time.currentElapsedTime();
+                // 预处理请求
                 pRequest(request);
             }
         } catch (Exception e) {
@@ -581,6 +583,7 @@ public class PrepRequestProcessor extends ZooKeeperCriticalThread implements Req
                 // synchronized block, otherwise there will be a race
                 // condition with the on flying deleteNode txn, and we'll
                 // delete the node again here, which is not correct
+                // 通过sessionId获取所有的临时节点
                 Set<String> es = zks.getZKDatabase().getEphemerals(request.sessionId);
                 for (ChangeRecord c : zks.outstandingChanges) {
                     if (c.stat == null) {
@@ -598,6 +601,7 @@ public class PrepRequestProcessor extends ZooKeeperCriticalThread implements Req
                         parentRecord.stat.setPzxid(request.getHdr().getZxid());
                         parentRecord.precalculatedDigest = precalculateDigest(
                                 DigestOpCode.UPDATE, parentPath, parentRecord.data, parentRecord.stat);
+                        // 将临时节点删除事件包装成ChangeRecord对象放入outstandingChanges
                         addChangeRecord(parentRecord);
                     }
                     nodeRecord = new ChangeRecord(
@@ -755,9 +759,12 @@ public class PrepRequestProcessor extends ZooKeeperCriticalThread implements Req
           pRequestHelper(request);
         }
 
+        // 设置请求的zxid(事务id)
         request.zxid = zks.getZxid();
         long timeFinishedPrepare = Time.currentElapsedTime();
         ServerMetrics.getMetrics().PREP_PROCESS_TIME.add(timeFinishedPrepare - request.prepStartTime);
+        // 提交到下一个处理器
+        // nextProcessor是SyncRequestProcessor
         nextProcessor.processRequest(request);
         ServerMetrics.getMetrics().PROPOSAL_PROCESS_TIME.add(Time.currentElapsedTime() - timeFinishedPrepare);
     }
@@ -1031,6 +1038,7 @@ public class PrepRequestProcessor extends ZooKeeperCriticalThread implements Req
 
     public void processRequest(Request request) {
         request.prepQueueStartTime = Time.currentElapsedTime();
+        // 加入到了一个阻塞队列中
         submittedRequests.add(request);
         ServerMetrics.getMetrics().PREP_PROCESSOR_QUEUED.add(1);
     }

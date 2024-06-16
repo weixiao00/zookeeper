@@ -30,6 +30,8 @@ import org.apache.zookeeper.server.util.AdHash;
  */
 public class NodeHashMapImpl implements NodeHashMap {
 
+    // 节点数据map
+    // key：path。 value: DataNode对象
     private final ConcurrentHashMap<String, DataNode> nodes;
     private final boolean digestEnabled;
     private final DigestCalculator digestCalculator;

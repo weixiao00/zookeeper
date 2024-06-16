@@ -241,6 +241,7 @@ public abstract class ServerCnxn implements Stats, Watcher {
         if (serverStats != null) {
             serverStats.updateClientResponseSize(packetLength);
         }
+        // 分配堆内存
         ByteBuffer lengthBuffer = ByteBuffer.allocate(4).putInt(packetLength);
         lengthBuffer.rewind();
 

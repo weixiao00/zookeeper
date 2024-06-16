@@ -281,7 +281,10 @@ public class ZooKeeper implements AutoCloseable {
          */
         public void register(int rc) {
             if (shouldAddWatch(rc)) {
+                // 客户端保存监听的map
+                // key:path value:watcher集合
                 Map<String, Set<Watcher>> watches = getWatches(rc);
+                // 将客户端的监听对象保存起来
                 synchronized (watches) {
                     Set<Watcher> watchers = watches.get(clientPath);
                     if (watchers == null) {
@@ -315,6 +318,7 @@ public class ZooKeeper implements AutoCloseable {
 
         @Override
         protected Map<String, Set<Watcher>> getWatches(int rc) {
+            // 这里服务端的FinalRequestProcessor里的replyHeader里的err是KeeperException.Code.OK.intValue()
             return rc == KeeperException.Code.OK.intValue()
                     ? getWatchManager().getDataWatches() : getWatchManager().getExistWatches();
         }
@@ -448,6 +452,13 @@ public class ZooKeeper implements AutoCloseable {
      *             <li> for an invalid list of ZooKeeper hosts
      *             <li> watcher is null
      *             </ul>
+     */
+    /**
+     * 创建一个zookeeper客户端连接，并且注册一个watcher回调
+     * @param connectString
+     * @param sessionTimeout
+     * @param watcher
+     * @throws IOException
      */
     public ZooKeeper(String connectString, int sessionTimeout, Watcher watcher) throws IOException {
         this(connectString, sessionTimeout, watcher, false);
@@ -665,6 +676,7 @@ public class ZooKeeper implements AutoCloseable {
         this.hostProvider = hostProvider;
         ConnectStringParser connectStringParser = new ConnectStringParser(connectString);
 
+        // 初始化客户端连接线程
         cnxn = createConnection(
             connectStringParser.getChrootPath(),
             hostProvider,
@@ -673,6 +685,7 @@ public class ZooKeeper implements AutoCloseable {
             watcher,
             getClientCnxnSocket(),
             canBeReadOnly);
+        // 开启客户端的线程
         cnxn.start();
     }
 
@@ -1906,17 +1919,25 @@ public class ZooKeeper implements AutoCloseable {
         // the watch contains the un-chroot path
         WatchRegistration wcb = null;
         if (watcher != null) {
+            // 将watcher封装到WatchRegistration中
             wcb = new ExistsWatchRegistration(watcher, clientPath);
         }
 
         final String serverPath = prependChroot(clientPath);
 
+        // 创建一个请求头
         RequestHeader h = new RequestHeader();
+        // 设置请求类型
         h.setType(ZooDefs.OpCode.exists);
+        // 创建一个请求的request
         ExistsRequest request = new ExistsRequest();
+        // 设置请求的path
         request.setPath(serverPath);
+        // 设置是否需要watch
         request.setWatch(watcher != null);
+        // 创建一个response对象
         SetDataResponse response = new SetDataResponse();
+        // 提交请求到一个queue里。生产者消费者模型
         ReplyHeader r = cnxn.submitRequest(h, request, response, wcb);
         if (r.getErr() != 0) {
             if (r.getErr() == KeeperException.Code.NONODE.intValue()) {

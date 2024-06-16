@@ -43,8 +43,10 @@ public class WatchManager implements IWatchManager {
 
     private static final Logger LOG = LoggerFactory.getLogger(WatchManager.class);
 
+    // 存储path对应的watcher
     private final Map<String, Set<Watcher>> watchTable = new HashMap<>();
 
+    // 存储watcher监听的所有path
     private final Map<Watcher, Set<String>> watch2Paths = new HashMap<>();
 
     private final WatcherModeManager watcherModeManager = new WatcherModeManager();
@@ -69,11 +71,13 @@ public class WatchManager implements IWatchManager {
 
     @Override
     public synchronized boolean addWatch(String path, Watcher watcher, WatcherMode watcherMode) {
+        // 判断watcher是否断开了
         if (isDeadWatcher(watcher)) {
             LOG.debug("Ignoring addWatch with closed cnxn");
             return false;
         }
 
+        // 获取path对应的watcher
         Set<Watcher> list = watchTable.get(path);
         if (list == null) {
             // don't waste memory if there are few watches on a node
@@ -84,6 +88,7 @@ public class WatchManager implements IWatchManager {
         }
         list.add(watcher);
 
+        // 获取watcher监听的所有path
         Set<String> paths = watch2Paths.get(watcher);
         if (paths == null) {
             // cnxns typically have many watches, so use default cap here
@@ -91,8 +96,14 @@ public class WatchManager implements IWatchManager {
             watch2Paths.put(watcher, paths);
         }
 
-        watcherModeManager.setWatcherMode(watcher, path, watcherMode);
-
+        // 添加watcher的订阅类型
+        // WatcherMode
+        // STANDARD(false, false),
+        // PERSISTENT(true, false),
+        // PERSISTENT_RECURSIVE(true, true)
+        //watch 有三种类型，一种是PERSISTENT、一种是PERSISTENT_RECURSIVE、STANDARD，前者是 持久化订阅，
+        // 后者是持久化递归订阅，所谓递归订阅就是针对监听的节点的子节点的变化都会触发监听,
+         watcherModeManager.setWatcherMode(watcher, path, watcherMode);
         return paths.add(path);
     }
 
@@ -119,29 +130,48 @@ public class WatchManager implements IWatchManager {
         return triggerWatch(path, type, null);
     }
 
+    /**
+     * 触发监听的方法。客户端的回调
+     * @param path znode path
+     * @param type the watch event type
+     * @param supress the suppressed watcher set
+     *
+     * @return
+     */
     @Override
     public WatcherOrBitSet triggerWatch(String path, EventType type, WatcherOrBitSet supress) {
+        //根据类型、连接状态、路径，构建WatchedEvent？
         WatchedEvent e = new WatchedEvent(type, KeeperState.SyncConnected, path);
+        // 存储需要回调的watcher
         Set<Watcher> watchers = new HashSet<>();
+        //是否是递归watcher，也就是如果针对/mic加了递归的watch，那么如果/mic下有子节点，则 会递归/mic下所有子节点，触发事件通知？
         PathParentIterator pathParentIterator = getPathParentIterator(path);
         synchronized (this) {
             for (String localPath : pathParentIterator.asIterable()) {
+                // 获取所有的客户端watcher，也就是客户端连接
                 Set<Watcher> thisWatchers = watchTable.get(localPath);
                 if (thisWatchers == null || thisWatchers.isEmpty()) {
                     continue;
                 }
+                // 对于一个path，可能有多个客户端监听，这里需要遍历所有的watcher
                 Iterator<Watcher> iterator = thisWatchers.iterator();
                 while (iterator.hasNext()) {
                     Watcher watcher = iterator.next();
+                    // 获取订阅类型
                     WatcherMode watcherMode = watcherModeManager.getWatcherMode(watcher, localPath);
                     if (watcherMode.isRecursive()) {
+                        // 如果是递归订阅，子节点变化也要回调
                         if (type != EventType.NodeChildrenChanged) {
                             watchers.add(watcher);
                         }
                     } else if (!pathParentIterator.atParentPath()) {
                         watchers.add(watcher);
+                        // 如果不是持久订阅
                         if (!watcherMode.isPersistent()) {
+                            // 删除watcher
+                            // 这里直接删除，所以是一次性的订阅
                             iterator.remove();
+                            // 删除watcher对应的path
                             Set<String> paths = watch2Paths.get(watcher);
                             if (paths != null) {
                                 paths.remove(localPath);
@@ -154,6 +184,7 @@ public class WatchManager implements IWatchManager {
                 }
             }
         }
+        // 需要回调的watcher为空，直接返回
         if (watchers.isEmpty()) {
             if (LOG.isTraceEnabled()) {
                 ZooTrace.logTraceMessage(LOG, ZooTrace.EVENT_DELIVERY_TRACE_MASK, "No watchers for " + path);
@@ -161,10 +192,17 @@ public class WatchManager implements IWatchManager {
             return null;
         }
 
+        // 遍历watcher，循环回调
         for (Watcher w : watchers) {
             if (supress != null && supress.contains(w)) {
                 continue;
             }
+            //还记得我们在服务端绑定事件的时候，watcher绑定是是什么？是ServerCnxn， 所以w.process(e)，其
+            //实调用的应该是ServerCnxn的process方法。而servercnxn又是一个抽象方法，有两个实现类，分别
+            //是：NIOServerCnxn和NettyServerCnxn。那接下来我们扒开NIOServerCnxn这个类的process方法看
+            //看究竟是怎么回调的。
+            // 回调watcher
+            // 这里的w就是NIOServerCnxn
             w.process(e);
         }
 

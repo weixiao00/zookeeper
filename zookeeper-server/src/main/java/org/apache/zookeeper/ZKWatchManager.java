@@ -38,8 +38,11 @@ class ZKWatchManager implements ClientWatchManager {
 
     private static final Logger LOG = LoggerFactory.getLogger(ZKWatchManager.class);
 
+    // 保存了所有的watcher。一般都是用这个
     private final Map<String, Set<Watcher>> dataWatches = new HashMap<>();
+    // 保存是否存在的watcher
     private final Map<String, Set<Watcher>> existWatches = new HashMap<>();
+    // 保存子节点变化的watcher
     private final Map<String, Set<Watcher>> childWatches = new HashMap<>();
     private final Map<String, Set<Watcher>> persistentWatches = new HashMap<>();
     private final Map<String, Set<Watcher>> persistentRecursiveWatches = new HashMap<>();
@@ -347,8 +350,18 @@ class ZKWatchManager implements ClientWatchManager {
         Watcher.Event.EventType type,
         String clientPath
     ) {
+        // 需要返回的watcher结果
         final Set<Watcher> result = new HashSet<>();
 
+        // None(-1),
+        //            NodeCreated(1),
+        //            NodeDeleted(2),
+        //            NodeDataChanged(3),
+        //            NodeChildrenChanged(4),
+        //            DataWatchRemoved(5),
+        //            ChildWatchRemoved(6),
+        //            PersistentWatchRemoved (7);
+        // 根据监听的类型，从对应的map中获取对应的watcher
         switch (type) {
         case None:
             if (defaultWatcher != null) {
@@ -398,22 +411,30 @@ class ZKWatchManager implements ClientWatchManager {
             return result;
         case NodeDataChanged:
         case NodeCreated:
+            // 获取dataWatches中的watcher
             synchronized (dataWatches) {
+                // 添加到结果中
+                // 并且移除watcher，所有这里的一个性的订阅只能被触发一次
                 addTo(dataWatches.remove(clientPath), result);
             }
+            // 获取existWatches中的watcher
             synchronized (existWatches) {
+                // 并且移除watcher，所有这里的一个性的订阅只能被触发一次
                 addTo(existWatches.remove(clientPath), result);
             }
             addPersistentWatches(clientPath, result);
             break;
         case NodeChildrenChanged:
+            // 获取childWatches中的watcher
             synchronized (childWatches) {
+                // 并且移除watcher，所有这里的一个性的订阅只能被触发一次
                 addTo(childWatches.remove(clientPath), result);
             }
             addPersistentWatches(clientPath, result);
             break;
         case NodeDeleted:
             synchronized (dataWatches) {
+                // 并且移除watcher，所有这里的一个性的订阅只能被触发一次
                 addTo(dataWatches.remove(clientPath), result);
             }
             // TODO This shouldn't be needed, but just in case

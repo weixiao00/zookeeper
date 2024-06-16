@@ -51,6 +51,7 @@ public class WorkerService {
 
     private final String threadNamePrefix;
     private int numWorkerThreads;
+    // 默认为false
     private boolean threadsAreAssignable;
 
     private volatile boolean stopped = true;
@@ -112,16 +113,20 @@ public class WorkerService {
             return;
         }
 
+        // 创建一个ScheduledWorkRequest对象，包装workRequest
+        // ScheduledWorkRequest实现了Runnable接口
         ScheduledWorkRequest scheduledWorkRequest = new ScheduledWorkRequest(workRequest);
 
         // If we have a worker thread pool, use that; otherwise, do the work
         // directly.
         int size = workers.size();
+        // 存在线程池，交给线程池处理，否则调用run直接处理
         if (size > 0) {
             try {
                 // make sure to map negative ids as well to [0, size-1]
                 int workerNum = ((int) (id % size) + size) % size;
                 ExecutorService worker = workers.get(workerNum);
+                // 交给线程池处理
                 worker.execute(scheduledWorkRequest);
             } catch (RejectedExecutionException e) {
                 LOG.warn("ExecutorService rejected execution", e);
@@ -150,6 +155,7 @@ public class WorkerService {
                     workRequest.cleanup();
                     return;
                 }
+                // 执行处理
                 workRequest.doWork();
             } catch (Exception e) {
                 LOG.warn("Unexpected exception", e);
@@ -202,6 +208,7 @@ public class WorkerService {
                     workers.add(Executors.newFixedThreadPool(1, new DaemonThreadFactory(threadNamePrefix, i)));
                 }
             } else {
+                // 创建一个固定大小的线程池
                 workers.add(Executors.newFixedThreadPool(numWorkerThreads, new DaemonThreadFactory(threadNamePrefix)));
             }
         }

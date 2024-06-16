@@ -108,6 +108,7 @@ public class FinalRequestProcessor implements RequestProcessor {
     }
 
     private ProcessTxnResult applyRequest(Request request) {
+        // 提交请求到数据树
         ProcessTxnResult rc = zks.processTxn(request);
 
         // ZOOKEEPER-558:
@@ -119,6 +120,7 @@ public class FinalRequestProcessor implements RequestProcessor {
             // We need to check if we can close the session id.
             // Sometimes the corresponding ServerCnxnFactory could be null because
             // we are just playing diffs from the leader.
+            // 管理session移除客户端连接的服务端对象NIOServerCnxn
             if (closeSession(zks.serverCnxnFactory, request.sessionId)
                 || closeSession(zks.secureServerCnxnFactory, request.sessionId)) {
                 return rc;
@@ -155,11 +157,15 @@ public class FinalRequestProcessor implements RequestProcessor {
         }
         ProcessTxnResult rc = null;
         if (!request.isThrottled()) {
+            // 提交请求
+            // 最后调用到DataTree里
+            // 创建节点，删除节点等
           rc = applyRequest(request);
         }
         if (request.cnxn == null) {
             return;
         }
+        // 服务端连接对象
         ServerCnxn cnxn = request.cnxn;
 
         long lastZxid = zks.getZKDatabase().getDataTreeLastProcessedZxid();
@@ -215,6 +221,7 @@ public class FinalRequestProcessor implements RequestProcessor {
                 lastOp = "PING";
                 updateStats(request, lastOp, lastZxid);
 
+                // 发送客户端ping请求的响应
                 responseSize = cnxn.sendResponse(new ReplyHeader(ClientCnxn.PING_XID, lastZxid, 0), null, "response");
                 return;
             }
@@ -361,12 +368,16 @@ public class FinalRequestProcessor implements RequestProcessor {
             case OpCode.exists: {
                 lastOp = "EXIS";
                 // TODO we need to figure out the security requirement for this!
+                // 构造一个exists的请求对象
                 ExistsRequest existsRequest = request.readRequestRecord(ExistsRequest::new);
                 path = existsRequest.getPath();
                 if (path.indexOf('\0') != -1) {
                     throw new KeeperException.BadArgumentsException();
                 }
+                // 获取节点的状态信息。并且如果watch为true的话，会注册一个watcher
+                // watcher其实就是NIOServerCnxn
                 Stat stat = zks.getZKDatabase().statNode(path, existsRequest.getWatch() ? cnxn : null);
+                // 构造一个exists的响应对象
                 rsp = new ExistsResponse(stat);
                 requestPathMetricsCollector.registerRequest(request.type, path);
                 break;
@@ -576,12 +587,14 @@ public class FinalRequestProcessor implements RequestProcessor {
             err = Code.MARSHALLINGERROR;
         }
 
+        // 响应头
         ReplyHeader hdr = new ReplyHeader(request.cxid, lastZxid, err.intValue());
 
         updateStats(request, lastOp, lastZxid);
 
         try {
             if (path == null || rsp == null) {
+                // 发送响应
                 responseSize = cnxn.sendResponse(hdr, rsp, "response");
             } else {
                 int opCode = request.type;
@@ -589,6 +602,7 @@ public class FinalRequestProcessor implements RequestProcessor {
                 // Serialized read and get children responses could be cached by the connection
                 // object. Cache entries are identified by their path and last modified zxid,
                 // so these values are passed along with the response.
+                // 判断发送的响应类型
                 switch (opCode) {
                     case OpCode.getData : {
                         GetDataResponse getDataResponse = (GetDataResponse) rsp;
@@ -603,10 +617,12 @@ public class FinalRequestProcessor implements RequestProcessor {
                         break;
                     }
                     default:
+                        // 发送响应
                         responseSize = cnxn.sendResponse(hdr, rsp, "response");
                 }
             }
 
+            // 如果是关闭session的请求，那么回复关闭session
             if (request.type == OpCode.closeSession) {
                 cnxn.sendCloseSession();
             }

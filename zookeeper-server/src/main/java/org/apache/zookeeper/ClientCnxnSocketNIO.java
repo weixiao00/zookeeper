@@ -70,6 +70,7 @@ public class ClientCnxnSocketNIO extends ClientCnxnSocket {
         if (sock == null) {
             throw new IOException("Socket is null!");
         }
+        // 服务端有响应了开始读取数据
         if (sockKey.isReadable()) {
             int rc = sock.read(incomingBuffer);
             if (rc < 0) {
@@ -95,19 +96,24 @@ public class ClientCnxnSocketNIO extends ClientCnxnSocket {
                     updateLastHeard();
                     initialized = true;
                 } else {
+                    // 从buffer中读数据到response中
                     sendThread.readResponse(incomingBuffer);
                     lenBuffer.clear();
                     incomingBuffer = lenBuffer;
+                    // 更新最后的心跳时间
                     updateLastHeard();
                 }
             }
         }
         if (sockKey.isWritable()) {
+            // 找到需要发送的packet
             Packet p = findSendablePacket(outgoingQueue, sendThread.tunnelAuthInProgress());
 
             if (p != null) {
+                // 更新最后发送时间
                 updateLastSend();
                 // If we already started writing p, p.bb will already exist
+                // 如果没有创建ByteBuffer, 就创建ByteBuffer
                 if (p.bb == null) {
                     if ((p.requestHeader != null)
                         && (p.requestHeader.getType() != OpCode.ping)
@@ -116,14 +122,17 @@ public class ClientCnxnSocketNIO extends ClientCnxnSocket {
                     }
                     p.createBB();
                 }
+                // 写入数据
                 sock.write(p.bb);
                 if (!p.bb.hasRemaining()) {
                     sentCount.getAndIncrement();
+                    // 如果发送成功, 从outgoingQueue中移除
                     outgoingQueue.removeFirstOccurrence(p);
                     if (p.requestHeader != null
                         && p.requestHeader.getType() != OpCode.ping
                         && p.requestHeader.getType() != OpCode.auth) {
                         synchronized (pendingQueue) {
+                            // 将packet放入pendingQueue，等待回复队列
                             pendingQueue.add(p);
                         }
                     }
@@ -256,7 +265,9 @@ public class ClientCnxnSocketNIO extends ClientCnxnSocket {
      * @throws IOException
      */
     void registerAndConnect(SocketChannel sock, InetSocketAddress addr) throws IOException {
+        // 将客户端连接注册到selector上
         sockKey = sock.register(selector, SelectionKey.OP_CONNECT);
+        // 连接到远程主机
         boolean immediateConnect = sock.connect(addr);
         if (immediateConnect) {
             sendThread.primeConnection();
@@ -265,6 +276,7 @@ public class ClientCnxnSocketNIO extends ClientCnxnSocket {
 
     @Override
     void connect(InetSocketAddress addr) throws IOException {
+        // 创建一个客户端的SocketChannel
         SocketChannel sock = createSock();
         try {
             registerAndConnect(sock, addr);
@@ -329,6 +341,8 @@ public class ClientCnxnSocketNIO extends ClientCnxnSocket {
         int waitTimeOut,
         Queue<Packet> pendingQueue,
         ClientCnxn cnxn) throws IOException, InterruptedException {
+        // 阻塞等待被唤醒。在添加packet到outgoingQueue时会调用selector.wakeup()唤醒
+        // 阻塞to时间，也就是下一次发送心跳的时间
         selector.select(waitTimeOut);
         Set<SelectionKey> selected;
         synchronized (this) {
@@ -340,13 +354,17 @@ public class ClientCnxnSocketNIO extends ClientCnxnSocket {
         updateNow();
         for (SelectionKey k : selected) {
             SocketChannel sc = ((SocketChannel) k.channel());
+            // 连接事件
             if ((k.readyOps() & SelectionKey.OP_CONNECT) != 0) {
                 if (sc.finishConnect()) {
+                    // 更新最后的发送和最后的心跳时间
                     updateLastSendAndHeard();
                     updateSocketAddresses();
+                    // 连接server
                     sendThread.primeConnection();
                 }
             } else if ((k.readyOps() & (SelectionKey.OP_READ | SelectionKey.OP_WRITE)) != 0) {
+                // 读写事件
                 doIO(pendingQueue, cnxn);
             }
         }

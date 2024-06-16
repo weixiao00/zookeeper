@@ -93,6 +93,7 @@ import org.slf4j.LoggerFactory;
  * full paths to DataNodes and a tree of DataNodes. All accesses to a path is
  * through the hashtable. The tree is traversed only when serializing to disk.
  */
+// 节点数据数据树
 public class DataTree {
 
     private static final Logger LOG = LoggerFactory.getLogger(DataTree.class);
@@ -103,10 +104,13 @@ public class DataTree {
      * This map provides a fast lookup to the datanodes. The tree is the
      * source of truth and is where all the locking occurs
      */
+    // 节点数据map
     private final NodeHashMap nodes;
 
+    // watcher监听管理器
     private IWatchManager dataWatches;
 
+    // 子节点watcher监听管理器
     private IWatchManager childWatches;
 
     /** cached total size of paths and data for all DataNodes */
@@ -152,6 +156,7 @@ public class DataTree {
     /**
      * This hashtable lists the paths of the ephemeral nodes of a session.
      */
+    // 存储临时节点 key：sessionId，value：临时节点path集合
     private final Map<Long, HashSet<String>> ephemerals = new ConcurrentHashMap<Long, HashSet<String>>();
 
     /**
@@ -190,6 +195,11 @@ public class DataTree {
 
     private final DigestCalculator digestCalculator;
 
+    /**
+     * 通过sessionId获取所有的临时节点
+     * @param sessionId
+     * @return
+     */
     @SuppressWarnings("unchecked")
     public Set<String> getEphemerals(long sessionId) {
         HashSet<String> retv = ephemerals.get(sessionId);
@@ -285,6 +295,7 @@ public class DataTree {
 
     DataTree(DigestCalculator digestCalculator) {
         this.digestCalculator = digestCalculator;
+        // 实际存储数据的map
         nodes = new NodeHashMapImpl(digestCalculator);
 
         /* Rather than fight it, let root have an alias */
@@ -302,6 +313,7 @@ public class DataTree {
 
         nodeDataSize.set(approximateDataSize());
         try {
+            // 创建watch管理器，包括当前节点和子节点
             dataWatches = WatchManagerFactory.createWatchManager();
             childWatches = WatchManagerFactory.createWatchManager();
         } catch (Exception e) {
@@ -418,6 +430,7 @@ public class DataTree {
      * @throws NodeExistsException
      * @throws NoNodeException
      */
+    // 创建节点
     public void createNode(final String path, byte[] data, List<ACL> acl, long ephemeralOwner, int parentCVersion, long zxid, long time) throws NoNodeException, NodeExistsException {
         createNode(path, data, acl, ephemeralOwner, parentCVersion, zxid, time, null);
     }
@@ -443,9 +456,12 @@ public class DataTree {
      */
     public void createNode(final String path, byte[] data, List<ACL> acl, long ephemeralOwner, int parentCVersion, long zxid, long time, Stat outputStat) throws KeeperException.NoNodeException, KeeperException.NodeExistsException {
         int lastSlash = path.lastIndexOf('/');
+        // 获取父节点的path
         String parentName = path.substring(0, lastSlash);
+        // 获取子节点的path，比如/a/b/c，获取c
         String childName = path.substring(lastSlash + 1);
         StatPersisted stat = createStat(zxid, time, ephemeralOwner);
+        // 获取父节点
         DataNode parent = nodes.get(parentName);
         if (parent == null) {
             throw new KeeperException.NoNodeException();
@@ -464,6 +480,7 @@ public class DataTree {
             // we did for the global sessions.
             Long longval = aclCache.convertAcls(acl);
 
+            // 获取子节点的path。
             Set<String> children = parent.getChildren();
             if (children.contains(childName)) {
                 throw new KeeperException.NodeExistsException();
@@ -479,14 +496,18 @@ public class DataTree {
             // exist in the snapshot, so replay the creation might revert the
             // cversion and pzxid, need to check and only update when it's
             // larger.
+            // 这里是更新父节点状态的子节点的版本号和zxid
             if (parentCVersion > parent.stat.getCversion()) {
                 parent.stat.setCversion(parentCVersion);
                 parent.stat.setPzxid(zxid);
             }
+            // 创建一个子节点
             DataNode child = new DataNode(data, longval, stat);
+            // 子节点接入到父节点中的集合中
             parent.addChild(childName);
             nodes.postChange(parentName, parent);
             nodeDataSize.addAndGet(getNodeSize(path, child.data));
+            // 将子节点加入到节点数据map中
             nodes.put(path, child);
             EphemeralType ephemeralType = EphemeralType.get(ephemeralOwner);
             if (ephemeralType == EphemeralType.CONTAINER) {
@@ -494,6 +515,9 @@ public class DataTree {
             } else if (ephemeralType == EphemeralType.TTL) {
                 ttls.add(path);
             } else if (ephemeralOwner != 0) {
+                // ephemeralOwner就是sessionId
+                // 加入到临时节点的map中
+                // 表示这个sessionId有多个临时节点
                 HashSet<String> list = ephemerals.get(ephemeralOwner);
                 if (list == null) {
                     list = new HashSet<String>();
@@ -527,7 +551,9 @@ public class DataTree {
             updateQuotaStat(lastPrefix, bytes, 1);
         }
         updateWriteStat(path, bytes);
+        // 回调客户端的watcher
         dataWatches.triggerWatch(path, Event.EventType.NodeCreated);
+        // 回调父节点的watcher. 比如这里创建了/a/b/c节点，那么/a/b节点的watcher会被触发。需要在getChildren的方法注册监听
         childWatches.triggerWatch(parentName.equals("") ? "/" : parentName, Event.EventType.NodeChildrenChanged);
     }
 
@@ -540,20 +566,25 @@ public class DataTree {
      *            the current zxid
      * @throws KeeperException.NoNodeException
      */
+    // 删除某个节点
     public void deleteNode(String path, long zxid) throws KeeperException.NoNodeException {
         int lastSlash = path.lastIndexOf('/');
+        // 父节点path
         String parentName = path.substring(0, lastSlash);
+        // 子节点名字
         String childName = path.substring(lastSlash + 1);
 
         // The child might already be deleted during taking fuzzy snapshot,
         // but we still need to update the pzxid here before throw exception
         // for no such child
+        // 获取父节点数据
         DataNode parent = nodes.get(parentName);
         if (parent == null) {
             throw new KeeperException.NoNodeException();
         }
         synchronized (parent) {
             nodes.preChange(parentName, parent);
+            // 从父节点的子节点集合中删除子节点
             parent.removeChild(childName);
             // Only update pzxid when the zxid is larger than the current pzxid,
             // otherwise we might override some higher pzxid set by a create
@@ -564,10 +595,12 @@ public class DataTree {
             nodes.postChange(parentName, parent);
         }
 
+        // 获取节点
         DataNode node = nodes.get(path);
         if (node == null) {
             throw new KeeperException.NoNodeException();
         }
+        // 从数据集合map中删除子节点
         nodes.remove(path);
         synchronized (node) {
             aclCache.removeUsage(node.acl);
@@ -624,18 +657,33 @@ public class DataTree {
                 "childWatches.triggerWatch " + parentName);
         }
 
+        // 回调客户端watcher监听事件。本节点事件监听删除
         WatcherOrBitSet processed = dataWatches.triggerWatch(path, EventType.NodeDeleted);
+        // 监听了子节点事件删除
         childWatches.triggerWatch(path, EventType.NodeDeleted, processed);
+        // 父节点事件监听子节点事件变化
         childWatches.triggerWatch("".equals(parentName) ? "/" : parentName, EventType.NodeChildrenChanged);
     }
 
+    /**
+     * 更新某个节点的数据
+     * @param path
+     * @param data
+     * @param version
+     * @param zxid
+     * @param time
+     * @return
+     * @throws KeeperException.NoNodeException
+     */
     public Stat setData(String path, byte[] data, int version, long zxid, long time) throws KeeperException.NoNodeException {
         Stat s = new Stat();
+        // 找到节点数据
         DataNode n = nodes.get(path);
         if (n == null) {
             throw new KeeperException.NoNodeException();
         }
         byte[] lastdata = null;
+        // 更新节点数据
         synchronized (n) {
             lastdata = n.data;
             nodes.preChange(path, n);
@@ -658,6 +706,8 @@ public class DataTree {
         nodeDataSize.addAndGet(getNodeSize(path, data) - getNodeSize(path, lastdata));
 
         updateWriteStat(path, dataBytes);
+        // 回调客户端事件监听
+        // 触发监听
         dataWatches.triggerWatch(path, EventType.NodeDataChanged);
         return s;
     }
@@ -681,12 +731,26 @@ public class DataTree {
         }
     }
 
+    /**
+     * 注册watcher监听
+     * @param basePath
+     * @param watcher
+     * @param mode
+     */
     public void addWatch(String basePath, Watcher watcher, int mode) {
         WatcherMode watcherMode = WatcherMode.fromZooDef(mode);
         dataWatches.addWatch(basePath, watcher, watcherMode);
         childWatches.addWatch(basePath, watcher, watcherMode);
     }
 
+    /**
+     * 获取节点数据。同时可以注册一个watcher监听
+     * @param path
+     * @param stat
+     * @param watcher
+     * @return
+     * @throws KeeperException.NoNodeException
+     */
     public byte[] getData(String path, Stat stat, Watcher watcher) throws KeeperException.NoNodeException {
         DataNode n = nodes.get(path);
         byte[] data = null;
@@ -695,6 +759,7 @@ public class DataTree {
         }
         synchronized (n) {
             n.copyStat(stat);
+            // 注册watcher监听
             if (watcher != null) {
                 dataWatches.addWatch(path, watcher);
             }
@@ -704,9 +769,18 @@ public class DataTree {
         return data;
     }
 
+    /**
+     * 获取节点状态，同时可以注册一个watcher监听
+     * @param path
+     * @param stat
+     * @param watcher
+     * @return
+     * @throws KeeperException.NoNodeException
+     */
     public Stat statNode(String path, Watcher watcher) throws KeeperException.NoNodeException {
         Stat stat = new Stat();
         DataNode n = nodes.get(path);
+        // 注册watcher监听
         if (watcher != null) {
             dataWatches.addWatch(path, watcher);
         }
@@ -720,6 +794,14 @@ public class DataTree {
         return stat;
     }
 
+    /**
+     * 获取子节点，同时可以注册一个watcher监听
+     * @param path
+     * @param stat
+     * @param watcher
+     * @return
+     * @throws KeeperException.NoNodeException
+     */
     public List<String> getChildren(String path, Stat stat, Watcher watcher) throws KeeperException.NoNodeException {
         DataNode n = nodes.get(path);
         if (n == null) {
@@ -732,6 +814,7 @@ public class DataTree {
             }
             children = new ArrayList<String>(n.getChildren());
 
+            // 注册子节点的watcher监听
             if (watcher != null) {
                 childWatches.addWatch(path, watcher);
             }
@@ -746,6 +829,11 @@ public class DataTree {
         return children;
     }
 
+    /**
+     * 获取子节点的数量
+     * @param path
+     * @return
+     */
     public int getAllChildrenNumber(String path) {
         //cull out these two keys:"", "/"
         if ("/".equals(path)) {
@@ -929,6 +1017,7 @@ public class DataTree {
                 deleteNode(deleteTxn.getPath(), header.getZxid());
                 break;
             case OpCode.reconfig:
+                // 这里更新值的方法
             case OpCode.setData:
                 SetDataTxn setDataTxn = (SetDataTxn) txn;
                 rc.path = setDataTxn.getPath();
@@ -944,6 +1033,7 @@ public class DataTree {
                 rc.path = setACLTxn.getPath();
                 rc.stat = setACL(setACLTxn.getPath(), setACLTxn.getAcl(), setACLTxn.getVersion());
                 break;
+                // 关闭session删除临时节点
             case OpCode.closeSession:
                 long sessionId = header.getClientId();
                 if (txn != null) {
@@ -1127,6 +1217,7 @@ public class DataTree {
         killSession(session, zxid, ephemerals.remove(session), null);
     }
 
+    // 删除session对应的临时节点
     void killSession(long session, long zxid, Set<String> paths2DeleteLocal,
             List<String> paths2DeleteInTxn) {
         if (paths2DeleteInTxn != null) {
@@ -1154,11 +1245,18 @@ public class DataTree {
         deleteNodes(session, zxid, paths2DeleteLocal);
     }
 
+    /**
+     * 删除多个节点
+     * @param session
+     * @param zxid
+     * @param paths2Delete
+     */
     void deleteNodes(long session, long zxid, Iterable<String> paths2Delete) {
         for (String path : paths2Delete) {
             boolean deleted = false;
             String sessionHex = "0x" + Long.toHexString(session);
             try {
+                // 删除节点
                 deleteNode(path, zxid);
                 deleted = true;
                 LOG.debug("Deleting ephemeral node {} for session {}", path, sessionHex);
@@ -1199,6 +1297,11 @@ public class DataTree {
      * @param counts
      *            the int count
      */
+    /**
+     * 获取指定路径下的节点数量和字节数
+     * @param path
+     * @param counts
+     */
     private void getCounts(String path, Counts counts) {
         DataNode node = getNode(path);
         if (node == null) {
@@ -1215,6 +1318,7 @@ public class DataTree {
         counts.count += 1;
         counts.bytes += len;
         for (String child : children) {
+            // 递归获取子节点的数量和字节数
             getCounts(path + "/" + child, counts);
         }
     }
@@ -1488,6 +1592,7 @@ public class DataTree {
      * Returns a mapping of session ID to ephemeral znodes.
      *
      * @return map of session ID to sets of ephemeral znodes
+     * 获取zookeeper服务端内存中的所有临时节点
      */
     public Map<Long, Set<String>> getEphemerals() {
         Map<Long, Set<String>> ephemeralsCopy = new HashMap<Long, Set<String>>();
@@ -1535,10 +1640,14 @@ public class DataTree {
                 this.childWatches.addWatch(path, watcher);
             }
         }
+        // 只有客户端使用setWatcher()方法设置的watcher才会被添加到persistentWatches和persistentRecursiveWatches中
+        // 但是zookeeper官方的客户端没有使用setWatcher()方法设置watcher，所以这两个集合一直为空
+        // 持久化订阅
         for (String path : persistentWatches) {
             this.childWatches.addWatch(path, watcher, WatcherMode.PERSISTENT);
             this.dataWatches.addWatch(path, watcher, WatcherMode.PERSISTENT);
         }
+        // 递归持久化订阅
         for (String path : persistentRecursiveWatches) {
             this.childWatches.addWatch(path, watcher, WatcherMode.PERSISTENT_RECURSIVE);
             this.dataWatches.addWatch(path, watcher, WatcherMode.PERSISTENT_RECURSIVE);
@@ -1582,6 +1691,13 @@ public class DataTree {
         }
     }
 
+    /**
+     * 判断是否包含指定路径的watcher
+     * @param path
+     * @param type
+     * @param watcher
+     * @return
+     */
     public boolean containsWatcher(String path, WatcherType type, Watcher watcher) {
         boolean containsWatcher = false;
         switch (type) {
@@ -1603,6 +1719,13 @@ public class DataTree {
         return containsWatcher;
     }
 
+    /**
+     * 移除指定路径的watcher
+     * @param path
+     * @param type
+     * @param watcher
+     * @return
+     */
     public boolean removeWatch(String path, WatcherType type, Watcher watcher) {
         boolean removed = false;
         switch (type) {
@@ -1934,6 +2057,7 @@ public class DataTree {
         stat.setPzxid(zxid);
         stat.setVersion(0);
         stat.setAversion(0);
+        // 如果不是临时节点，ephemeralOwner为0，否则为创建者的session id
         stat.setEphemeralOwner(ephemeralOwner);
         return stat;
     }

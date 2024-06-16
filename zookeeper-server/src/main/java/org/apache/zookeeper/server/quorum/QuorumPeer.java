@@ -206,6 +206,9 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
         LOG.info("multiAddress.reachabilityCheckEnabled set to {}", multiAddressReachabilityCheckEnabled);
     }
 
+    /**
+     * 保存集群中的所有broker信息
+     */
     public static class QuorumServer {
 
         public MultipleAddresses addr = new MultipleAddresses();
@@ -1129,15 +1132,23 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
         if (!getView().containsKey(myid)) {
             throw new RuntimeException("My id " + myid + " not in the peer list");
         }
+        // 加载数据
         loadDataBase();
+        // 开启各个reactor线程。开始监听客户端的连接，处理事务请求和非事务请求
         startServerCnxnFactory();
         try {
             adminServer.start();
         } catch (AdminServerException e) {
             LOG.warn("Problem starting AdminServer", e);
         }
+        // 开启leader选举，创建leader选举的算法对象
         startLeaderElection();
         startJvmPauseMonitor();
+        // 启动选举的线程
+        // 启动server的reactor线程监听客户端的请求
+        // 创建leader选举对象
+        // Thread的start方法，调用QuorumPeer的run方法
+        // 最终根据策略模式调用makeLEStrategy().lookForLeader()方法。leader选举的核心方法
         super.start();
     }
 
@@ -1211,6 +1222,7 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
     public synchronized void startLeaderElection() {
         try {
             if (getPeerState() == ServerState.LOOKING) {
+                // 投票对象
                 currentVote = new Vote(myid, getLastLoggedZxid(), getCurrentEpoch());
             }
         } catch (IOException e) {
@@ -1219,6 +1231,7 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
             throw re;
         }
 
+        // 创建选择算法
         this.electionAlg = createElectionAlgorithm(electionType);
     }
 
@@ -1355,6 +1368,7 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
         case 2:
             throw new UnsupportedOperationException("Election Algorithm 2 is not supported.");
         case 3:
+            // 创建listener监听。监听选票的连接。创建发送选票和接收选票队列
             QuorumCnxManager qcm = createCnxnManager();
             QuorumCnxManager oldQcm = qcmRef.getAndSet(qcm);
             if (oldQcm != null) {
@@ -1363,8 +1377,15 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
             }
             QuorumCnxManager.Listener listener = qcm.listener;
             if (listener != null) {
+                // 开启一个线程，监听选票的连接
+                // 调用QuorumCnxManager.Listener的run方法，开启监听其他节点连接
                 listener.start();
+                // 创建发送选票和接收选票队列，创建发送选票和接收选票线程
+                // 上层线程
                 FastLeaderElection fle = new FastLeaderElection(this, qcm);
+                // 开启接收选票线程和发送选票线程
+                // 开启对象层面的线程，接收选票和发送选票
+                // 上层线程开启
                 fle.start();
                 le = fle;
             } else {
@@ -1489,6 +1510,8 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
                                 shuttingDownLE = false;
                                 startLeaderElection();
                             }
+                            // 选举leader
+                            // 设置leader的选票
                             setCurrentVote(makeLEStrategy().lookForLeader());
                         } catch (Exception e) {
                             LOG.warn("Unexpected exception", e);
@@ -1535,7 +1558,9 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
                 case FOLLOWING:
                     try {
                         LOG.info("FOLLOWING");
+                        // 成为follower
                         setFollower(makeFollower(logFactory));
+                        // 跟随leader。数据同步等
                         follower.followLeader();
                     } catch (Exception e) {
                         LOG.warn("Unexpected exception", e);
@@ -1548,7 +1573,9 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
                 case LEADING:
                     LOG.info("LEADING");
                     try {
+                        // 成为leader
                         setLeader(makeLeader(logFactory));
+                        // 领导follower
                         leader.lead();
                         setLeader(null);
                     } catch (Exception e) {
@@ -2096,6 +2123,7 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
     }
 
     private void startServerCnxnFactory() {
+        // 开启各种reactor连接线程
         if (cnxnFactory != null) {
             cnxnFactory.start();
         }
